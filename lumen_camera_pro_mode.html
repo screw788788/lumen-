@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-black text-white select-none">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lumen Camera - Pro Mode</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Phosphor Icons for professional camera icon set -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+    <style>
+        /* Custom scrollbars & range sliders styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 9999px;
+            height: 4px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #eab308;
+            cursor: pointer;
+            border: 2px solid #000;
+            box-shadow: 0 0 10px rgba(234, 179, 8, 0.5);
+        }
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Focus Reticle Animation */
+        @keyframes pulse-ring {
+            0% { transform: scale(1.3); opacity: 0.8; }
+            50% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .focus-box {
+            animation: pulse-ring 0.3s ease-out forwards;
+        }
+        /* Focus peaking highlight simulation */
+        .peaking-active {
+            filter: contrast(150%) brightness(110%);
+        }
+    </style>
+</head>
+<body class="h-full w-full overflow-hidden flex flex-col justify-between font-sans bg-black">
+
+    <!-- Top Status Bar & Quick Toggles -->
+    <header class="relative z-20 flex items-center justify-between px-4 py-3 bg-gradient-to-b from-black/80 to-transparent">
+        <div class="flex items-center space-x-3">
+            <span class="text-xs font-black tracking-widest text-amber-500 uppercase flex items-center gap-1">
+                <i class="ph-bold ph-aperture text-base"></i> LUMEN <span class="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/40">PRO</span>
+            </span>
+            <!-- Sensor Mode Selector -->
+            <select id="sensorMode" class="bg-neutral-900/80 text-amber-400 text-xs font-mono font-semibold px-2 py-1 rounded border border-neutral-700 outline-none focus:border-amber-500">
+                <option value="Standard">12MP Ultra-Sharp</option>
+                <option value="48MP">48MP Pro</option>
+                <option value="64MP">64MP Ultra</option>
+                <option value="108MP">108MP Master</option>
+                <option value="200MP">200MP Extreme</option>
+            </select>
+        </div>
+
+        <div class="flex items-center space-x-4 text-xs font-mono">
+            <!-- Flash Toggle -->
+            <button id="flashBtn" onclick="toggleFlash()" class="p-2 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-neutral-300 transition" title="Flash Control">
+                <i id="flashIcon" class="ph-bold ph-lightning-slash text-base"></i>
+            </button>
+
+            <!-- Timer Toggle -->
+            <button id="timerBtn" onclick="cycleTimer()" class="p-2 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-neutral-300 transition flex items-center gap-1" title="Self Timer">
+                <i class="ph-bold ph-timer text-base"></i>
+                <span id="timerVal" class="text-[10px] font-bold">OFF</span>
+            </button>
+
+            <!-- RAW Toggle -->
+            <button id="rawBtn" onclick="toggleRAW()" class="px-2 py-1 rounded bg-neutral-900/60 border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:text-white" title="RAW Uncompressed Capture">
+                RAW
+            </button>
+
+            <!-- D-LOG Toggle -->
+            <button id="dlogBtn" onclick="toggleDLog()" class="px-2 py-1 rounded bg-neutral-900/60 border border-neutral-700 text-neutral-400 text-[10px] font-bold tracking-wider hover:text-white" title="Flat D-Log Dynamic Range">
+                D-LOG
+            </button>
+
+            <!-- Depth Toggle -->
+            <button id="depthBtn" onclick="toggleDepth()" class="p-2 rounded-full bg-neutral-900/60 hover:bg-neutral-800 text-neutral-400 transition" title="Depth Map Control">
+                <i class="ph-bold ph-aperture text-base"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Camera Viewport Area -->
+    <main class="relative flex-1 w-full flex items-center justify-center overflow-hidden bg-neutral-950" id="viewportContainer">
+        
+        <!-- Live Video Element (Hidden rendering source for fast performance) -->
+        <video id="videoElement" autoplay playsinline muted class="hidden"></video>
+        
+        <!-- Real-Time Processing Canvas -->
+        <canvas id="viewfinderCanvas" class="w-full h-full object-contain cursor-crosshair"></canvas>
+
+        <!-- On-Screen Grid Overlay -->
+        <div id="gridOverlay" class="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 opacity-30 border border-white/20">
+            <div class="border-r border-b border-white/20"></div>
+            <div class="border-r border-b border-white/20"></div>
+            <div class="border-b border-white/20"></div>
+            <div class="border-r border-b border-white/20"></div>
+            <div class="border-r border-b border-white/20"></div>
+            <div class="border-b border-white/20"></div>
+            <div class="border-r border-white/20"></div>
+            <div class="border-r border-white/20"></div>
+            <div></div>
+        </div>
+
+        <!-- AF / AE Lock Reticle (Appears on tap) -->
+        <div id="focusReticle" class="absolute hidden w-16 h-16 pointer-events-none transform -translate-x-1/2 -translate-y-1/2">
+            <div class="focus-box w-full h-full border-2 border-amber-400 rounded-sm flex items-center justify-center relative">
+                <div class="w-1.5 h-1.5 bg-amber-400 rounded-full"></div>
+                <div id="lockBadge" class="absolute -top-5 text-[9px] font-mono bg-amber-500 text-black px-1 font-bold rounded opacity-0 transition-opacity">LOCKED</div>
+            </div>
+        </div>
+
+        <!-- Live Telemetry / Histograms & Badges -->
+        <div class="absolute top-3 left-4 pointer-events-none flex flex-col gap-1 text-[10px] font-mono text-amber-400/80 bg-black/40 p-2 rounded backdrop-blur-md">
+            <div id="telemetryRes" class="font-bold text-white">RES: 4000 x 3000</div>
+            <div id="telemetryISO">ISO: 100</div>
+            <div id="telemetryShutter">SPEED: 1/60s</div>
+            <div id="telemetryEV">EV: 0.0</div>
+            <div id="telemetryMode" class="text-amber-500">MODE: AUTOFOCUS</div>
+        </div>
+
+        <!-- Real-time Filter Overlay Indicator -->
+        <div id="filterBadge" class="absolute top-3 right-4 pointer-events-none text-[10px] font-mono font-bold bg-amber-500/90 text-black px-2 py-0.5 rounded shadow">
+            FILTER: NATURAL
+        </div>
+
+        <!-- Countdown Timer Overlay -->
+        <div id="countdownOverlay" class="absolute inset-0 bg-black/60 hidden flex items-center justify-center text-7xl font-mono font-bold text-amber-400 z-30">
+            3
+        </div>
+
+        <!-- Processing Indicator -->
+        <div id="processingOverlay" class="absolute inset-0 bg-black/75 hidden flex-col items-center justify-center z-40">
+            <div class="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+            <p id="processingText" class="mt-4 text-xs font-mono font-bold tracking-widest text-amber-400 uppercase">Processing Multi-Frame HDR...</p>
+        </div>
+    </main>
+
+    <!-- Pro Controls Dashboard & Controls -->
+    <footer class="relative z-20 bg-neutral-950 border-t border-neutral-900 flex flex-col px-4 py-3 gap-3">
+        
+        <!-- Filter Selector Carousel -->
+        <div class="flex items-center space-x-2 overflow-x-auto hide-scrollbar py-1">
+            <span class="text-[10px] font-mono text-neutral-500 font-bold uppercase pr-2">Filter</span>
+            <button onclick="setFilter('none', 'NATURAL')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-800 text-amber-400 border border-amber-500/50 whitespace-nowrap">Natural</button>
+            <button onclick="setFilter('crisp', 'CRISPY PRO')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap">Crispy Detail</button>
+            <button onclick="setFilter('vivid', 'VIVID SHARP')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap">Vivid</button>
+            <button onclick="setFilter('mono', 'LEICA MONO')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap">Pro Mono</button>
+            <button onclick="setFilter('cinematic', 'CINE GOLD')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap">Cine Gold</button>
+            <button onclick="setFilter('hdr', 'ULTRA HDR')" class="filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap">Ultra HDR</button>
+        </div>
+
+        <!-- Manual Sliders Bar (Dynamic based on selected Pro parameter) -->
+        <div class="bg-neutral-900/80 p-3 rounded-xl border border-neutral-800 flex flex-col gap-2">
+            
+            <!-- Parameter Sub-Tabs -->
+            <div class="flex justify-between border-b border-neutral-800 pb-2 text-xs font-mono">
+                <button onclick="showControlTab('ev')" id="tab-ev" class="param-tab text-amber-400 font-bold border-b-2 border-amber-400 pb-0.5">EV (Exposure)</button>
+                <button onclick="showControlTab('iso')" id="tab-iso" class="param-tab text-neutral-400">ISO</button>
+                <button onclick="showControlTab('shutter')" id="tab-shutter" class="param-tab text-neutral-400">Shutter</button>
+                <button onclick="showControlTab('focus')" id="tab-focus" class="param-tab text-neutral-400">Focus (MF/AF)</button>
+                <button onclick="showControlTab('wb')" id="tab-wb" class="param-tab text-neutral-400">WB (Kelvin)</button>
+            </div>
+
+            <!-- Dynamic Control Panels -->
+            <!-- 1. Exposure Compensation -->
+            <div id="panel-ev" class="control-panel flex items-center justify-between gap-4 py-1">
+                <span class="text-xs font-mono text-neutral-400 w-12">-2.0 EV</span>
+                <input type="range" id="evSlider" min="-2" max="2" step="0.1" value="0" class="w-full" oninput="updateEV(this.value)">
+                <span class="text-xs font-mono text-neutral-400 w-12 text-right">+2.0 EV</span>
+            </div>
+
+            <!-- 2. ISO Sensitivity -->
+            <div id="panel-iso" class="control-panel hidden flex items-center justify-between gap-4 py-1">
+                <span class="text-xs font-mono text-neutral-400">AUTO</span>
+                <input type="range" id="isoSlider" min="50" max="6400" step="50" value="100" class="w-full" oninput="updateISO(this.value)">
+                <span id="isoVal" class="text-xs font-mono text-amber-400 w-16 text-right">100</span>
+            </div>
+
+            <!-- 3. Shutter Speed -->
+            <div id="panel-shutter" class="control-panel hidden flex items-center justify-between gap-4 py-1">
+                <span class="text-xs font-mono text-neutral-400">1/1000s</span>
+                <input type="range" id="shutterSlider" min="1" max="10" step="1" value="5" class="w-full" oninput="updateShutter(this.value)">
+                <span id="shutterVal" class="text-xs font-mono text-amber-400 w-16 text-right">1/60s</span>
+            </div>
+
+            <!-- 4. Manual / Auto Focus -->
+            <div id="panel-focus" class="control-panel hidden flex items-center justify-between gap-3 py-1">
+                <button id="afMfToggle" onclick="toggleAFMF()" class="px-3 py-1 bg-amber-500 text-black text-xs font-bold font-mono rounded">AF AUTO</button>
+                <input type="range" id="focusSlider" min="0" max="1" step="0.01" value="0.5" disabled class="w-full opacity-50" oninput="updateManualFocus(this.value)">
+                <span id="focusVal" class="text-xs font-mono text-neutral-400 w-12 text-right">AUTO</span>
+            </div>
+
+            <!-- 5. White Balance -->
+            <div id="panel-wb" class="control-panel hidden flex items-center justify-between gap-4 py-1">
+                <span class="text-xs font-mono text-neutral-400">2800K</span>
+                <input type="range" id="wbSlider" min="2800" max="8000" step="100" value="5500" class="w-full" oninput="updateWB(this.value)">
+                <span id="wbVal" class="text-xs font-mono text-amber-400 w-16 text-right">5500K</span>
+            </div>
+        </div>
+
+        <!-- Main Shutter & Lock Actions Bar -->
+        <div class="flex items-center justify-between px-6 pt-1">
+            <!-- Focus Lock Button -->
+            <button id="lockAfBtn" onclick="toggleFocusLock()" class="flex flex-col items-center gap-1 text-neutral-400 hover:text-amber-400 transition">
+                <div class="w-10 h-10 rounded-full border border-neutral-700 bg-neutral-900 flex items-center justify-center">
+                    <i id="lockAfIcon" class="ph-bold ph-lock-key-open text-lg"></i>
+                </div>
+                <span class="text-[9px] font-mono tracking-wider">AF LOCK</span>
+            </button>
+
+            <!-- Main Shutter Trigger Button -->
+            <button onclick="triggerCapture()" class="group relative flex items-center justify-center">
+                <div class="w-20 h-20 rounded-full border-4 border-amber-500 flex items-center justify-center transition-transform active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.3)]">
+                    <div class="w-16 h-16 rounded-full bg-white group-hover:bg-amber-100 transition-colors"></div>
+                </div>
+            </button>
+
+            <!-- Exposure Lock Button -->
+            <button id="lockAeBtn" onclick="toggleExposureLock()" class="flex flex-col items-center gap-1 text-neutral-400 hover:text-amber-400 transition">
+                <div class="w-10 h-10 rounded-full border border-neutral-700 bg-neutral-900 flex items-center justify-center">
+                    <i id="lockAeIcon" class="ph-bold ph-sun-dim text-lg"></i>
+                </div>
+                <span class="text-[9px] font-mono tracking-wider">AE LOCK</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- Captured Photo Preview Modal -->
+    <div id="photoModal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between p-4">
+        <div class="flex justify-between items-center text-xs font-mono border-b border-neutral-800 pb-3">
+            <span class="text-amber-400 font-bold">LUMEN PRO CAPTURE</span>
+            <span id="modalMeta" class="text-neutral-400">200MP | RAW D-LOG</span>
+            <button onclick="closeModal()" class="p-2 text-neutral-400 hover:text-white">
+                <i class="ph-bold ph-x text-xl"></i>
+            </button>
+        </div>
+        <div class="flex-1 flex items-center justify-center py-4 overflow-hidden">
+            <img id="modalImage" class="max-h-full max-w-full object-contain rounded shadow-2xl border border-neutral-800" src="" alt="Captured Crisp Photo">
+        </div>
+        <div class="flex justify-center gap-4 border-t border-neutral-800 pt-3">
+            <button onclick="downloadImage()" class="flex items-center gap-2 bg-amber-500 text-black px-6 py-2.5 rounded-full font-bold text-xs tracking-wider uppercase shadow-lg hover:bg-amber-400">
+                <i class="ph-bold ph-download-simple text-base"></i> Save High-Res Photo
+            </button>
+        </div>
+    </div>
+
+    <!-- Application Engine JS -->
+    <script>
+        // Camera Engine State
+        const state = {
+            videoStream: null,
+            flashOn: false,
+            timerSec: 0,
+            isRaw: false,
+            isDLog: false,
+            isDepth: false,
+            currentFilter: 'none',
+            filterName: 'NATURAL',
+            ev: 0,
+            iso: 100,
+            shutter: 5,
+            shutterSpeeds: ['1/1000s', '1/500s', '1/250s', '1/125s', '1/60s', '1/30s', '1/15s', '1/8s', '1/4s', '1/2s'],
+            isManualFocus: false,
+            focusValue: 0.5,
+            wb: 5500,
+            afLocked: false,
+            aeLocked: false,
+            sensorMode: 'Standard',
+            simulatedStream: false
+        };
+
+        // DOM Elements
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('viewfinderCanvas');
+        const ctx = canvas.getContext('2d');
+        const reticle = document.getElementById('focusReticle');
+        const lockBadge = document.getElementById('lockBadge');
+
+        // Initialize Camera on Mount
+        window.onload = () => {
+            initCamera();
+            setupCanvasSize();
+            requestAnimationFrame(renderLoop);
+            window.addEventListener('resize', setupCanvasSize);
+        };
+
+        // Initialize Rear Facing Camera Stream
+        async function initCamera() {
+            try {
+                // Strict rear camera constraint (facingMode: environment)
+                const constraints = {
+                    video: {
+                        facingMode: { exact: "environment" },
+                        width: { ideal: 3840 },
+                        height: { ideal: 2160 }
+                    },
+                    audio: false
+                };
+                
+                state.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = state.videoStream;
+                state.simulatedStream = false;
+            } catch (err) {
+                console.warn("Exact rear camera not accessible, falling back to general back camera or simulation fallback.", err);
+                try {
+                    const fallbackConstraints = {
+                        video: { facingMode: "environment" },
+                        audio: false
+                    };
+                    state.videoStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                    video.srcObject = state.videoStream;
+                    state.simulatedStream = false;
+                } catch (fallbackErr) {
+                    console.warn("No physical camera available. Running Pro Visual Simulation mode.", fallbackErr);
+                    state.simulatedStream = true;
+                }
+            }
+        }
+
+        function setupCanvasSize() {
+            const container = document.getElementById('viewportContainer');
+            canvas.width = container.clientWidth * window.devicePixelRatio;
+            canvas.height = container.clientHeight * window.devicePixelRatio;
+            updateTelemetry();
+        }
+
+        // Zero-Lag Processing Render Loop
+        function renderLoop() {
+            if (canvas.width === 0 || canvas.height === 0) {
+                requestAnimationFrame(renderLoop);
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Base Stream or Generative Test Pattern
+            if (!state.simulatedStream && video.readyState >= 2) {
+                // Draw camera video feed maintaining aspect ratio
+                const hRatio = canvas.width / video.videoWidth;
+                const vRatio = canvas.height / video.videoHeight;
+                const ratio = Math.max(hRatio, vRatio);
+                const centerShiftX = (canvas.width - video.videoWidth * ratio) / 2;
+                const centerShiftY = (canvas.height - video.videoHeight * ratio) / 2;
+                
+                ctx.save();
+                applyCanvasFilters();
+                ctx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight,
+                             centerShiftX, centerShiftY, video.videoWidth * ratio, video.videoHeight * ratio);
+                ctx.restore();
+            } else {
+                // Fallback High-Tech Pro Sensor Pattern when no stream is present
+                drawSimulatedSensorFeed();
+            }
+
+            // Draw Depth Effect Highlight Overlay
+            if (state.isDepth) {
+                drawDepthOverlay();
+            }
+
+            requestAnimationFrame(renderLoop);
+        }
+
+        // Apply Image Processing & Dynamic Filters
+        function applyCanvasFilters() {
+            let filterStr = '';
+
+            // Exposure Compensation & ISO Brightness simulation
+            let brightness = 100 + (state.ev * 20) + ((state.iso - 100) / 100 * 2);
+            filterStr += `brightness(${Math.max(50, Math.min(200, brightness))}%) `;
+
+            // White balance color temperature simulation
+            let tempShift = (state.wb - 5500) / 50;
+            if (tempShift > 0) {
+                filterStr += `sepia(${Math.min(30, tempShift * 0.5)}%) `;
+            } else {
+                filterStr += `hue-rotate(${Math.max(-20, tempShift * 0.5)}deg) `;
+            }
+
+            // Active Preset Filters
+            switch (state.currentFilter) {
+                case 'crisp':
+                    filterStr += 'contrast(135%) saturate(110%) ';
+                    break;
+                case 'vivid':
+                    filterStr += 'saturate(180%) contrast(115%) ';
+                    break;
+                case 'mono':
+                    filterStr += 'grayscale(100%) contrast(140%) ';
+                    break;
+                case 'cinematic':
+                    filterStr += 'sepia(25%) contrast(120%) saturate(120%) ';
+                    break;
+                case 'hdr':
+                    filterStr += 'contrast(140%) brightness(105%) saturate(130%) ';
+                    break;
+            }
+
+            // D-Log Flat Profile Simulation
+            if (state.isDLog) {
+                filterStr += 'contrast(70%) saturate(80%) brightness(115%) ';
+            }
+
+            // Manual Focus Blur simulation
+            if (state.isManualFocus) {
+                let blurAmount = Math.abs(state.focusValue - 0.5) * 6;
+                filterStr += `blur(${blurAmount}px) `;
+            }
+
+            ctx.filter = filterStr.trim();
+        }
+
+        // Simulated High Resolution Optical Sensor Pattern
+        function drawSimulatedSensorFeed() {
+            ctx.save();
+            applyCanvasFilters();
+
+            // Dark grid canvas background
+            const time = Date.now() * 0.001;
+            ctx.fillStyle = '#0f1115';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Generative pro lens visual
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            ctx.lineWidth = 2;
+            for (let i = 1; i <= 4; i++) {
+                ctx.strokeStyle = `rgba(234, 179, 8, ${0.1 * i})`;
+                ctx.beginPath();
+                ctx.arc(cx, cy, i * (canvas.width * 0.1) + Math.sin(time) * 5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.font = '14px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText("PRO CAMERA SENSOR READY (" + state.sensorMode + ")", cx, cy);
+            ctx.fillText("TAP TO LOCK AF / AE", cx, cy + 30);
+
+            ctx.restore();
+        }
+
+        function drawDepthOverlay() {
+            ctx.save();
+            ctx.fillStyle = 'rgba(234, 179, 8, 0.08)';
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, Math.min(canvas.width, canvas.height) * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(234, 179, 8, 0.4)';
+            ctx.setLineDash([6, 6]);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Tap to Focus & Lock Target
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            reticle.style.left = `${x}px`;
+            reticle.style.top = `${y}px`;
+            reticle.classList.remove('hidden');
+
+            if (!state.afLocked && !state.aeLocked) {
+                // Focus Animation Reset
+                reticle.style.animation = 'none';
+                reticle.offsetHeight; /* trigger reflow */
+                reticle.style.animation = null;
+            }
+        });
+
+        // Flash Toggle
+        function toggleFlash() {
+            state.flashOn = !state.flashOn;
+            const icon = document.getElementById('flashIcon');
+            const btn = document.getElementById('flashBtn');
+            if (state.flashOn) {
+                icon.className = 'ph-bold ph-lightning text-base text-amber-400';
+                btn.classList.add('border', 'border-amber-500/50');
+            } else {
+                icon.className = 'ph-bold ph-lightning-slash text-base text-neutral-300';
+                btn.classList.remove('border', 'border-amber-500/50');
+            }
+        }
+
+        // Timer Toggle Cycle
+        function cycleTimer() {
+            const timers = [0, 3, 5, 10];
+            const idx = (timers.indexOf(state.timerSec) + 1) % timers.length;
+            state.timerSec = timers[idx];
+            document.getElementById('timerVal').innerText = state.timerSec === 0 ? 'OFF' : `${state.timerSec}s`;
+        }
+
+        // RAW & D-Log Toggles
+        function toggleRAW() {
+            state.isRaw = !state.isRaw;
+            const btn = document.getElementById('rawBtn');
+            btn.classList.toggle('bg-amber-500', state.isRaw);
+            btn.classList.toggle('text-black', state.isRaw);
+            btn.classList.toggle('border-amber-500', state.isRaw);
+        }
+
+        function toggleDLog() {
+            state.isDLog = !state.isDLog;
+            const btn = document.getElementById('dlogBtn');
+            btn.classList.toggle('bg-amber-500', state.isDLog);
+            btn.classList.toggle('text-black', state.isDLog);
+            btn.classList.toggle('border-amber-500', state.isDLog);
+        }
+
+        function toggleDepth() {
+            state.isDepth = !state.isDepth;
+            const btn = document.getElementById('depthBtn');
+            btn.classList.toggle('text-amber-400', state.isDepth);
+        }
+
+        // Tab Switching for Pro Sliders
+        function showControlTab(tabKey) {
+            document.querySelectorAll('.control-panel').forEach(p => p.classList.add('hidden'));
+            document.querySelectorAll('.param-tab').forEach(t => {
+                t.classList.remove('text-amber-400', 'font-bold', 'border-b-2', 'border-amber-400');
+                t.classList.add('text-neutral-400');
+            });
+
+            document.getElementById(`panel-${tabKey}`).classList.remove('hidden');
+            const activeTab = document.getElementById(`tab-${tabKey}`);
+            activeTab.classList.add('text-amber-400', 'font-bold', 'border-b-2', 'border-amber-400');
+            activeTab.classList.remove('text-neutral-400');
+        }
+
+        // Parameter Updaters
+        function updateEV(val) {
+            state.ev = parseFloat(val);
+            updateTelemetry();
+        }
+
+        function updateISO(val) {
+            state.iso = parseInt(val);
+            document.getElementById('isoVal').innerText = val;
+            updateTelemetry();
+        }
+
+        function updateShutter(val) {
+            state.shutter = parseInt(val);
+            document.getElementById('shutterVal').innerText = state.shutterSpeeds[state.shutter - 1];
+            updateTelemetry();
+        }
+
+        function toggleAFMF() {
+            state.isManualFocus = !state.isManualFocus;
+            const btn = document.getElementById('afMfToggle');
+            const slider = document.getElementById('focusSlider');
+            const valLabel = document.getElementById('focusVal');
+
+            if (state.isManualFocus) {
+                btn.innerText = 'MF MANUAL';
+                btn.className = 'px-3 py-1 bg-neutral-800 text-amber-400 border border-amber-500/50 text-xs font-bold font-mono rounded';
+                slider.disabled = false;
+                slider.classList.remove('opacity-50');
+                valLabel.innerText = `${Math.round(state.focusValue * 100)}%`;
+            } else {
+                btn.innerText = 'AF AUTO';
+                btn.className = 'px-3 py-1 bg-amber-500 text-black text-xs font-bold font-mono rounded';
+                slider.disabled = true;
+                slider.classList.add('opacity-50');
+                valLabel.innerText = 'AUTO';
+            }
+            updateTelemetry();
+        }
+
+        function updateManualFocus(val) {
+            state.focusValue = parseFloat(val);
+            document.getElementById('focusVal').innerText = `${Math.round(state.focusValue * 100)}%`;
+        }
+
+        function updateWB(val) {
+            state.wb = parseInt(val);
+            document.getElementById('wbVal').innerText = `${val}K`;
+        }
+
+        function toggleFocusLock() {
+            state.afLocked = !state.afLocked;
+            const icon = document.getElementById('lockAfIcon');
+            const btn = document.getElementById('lockAfBtn');
+            if (state.afLocked) {
+                icon.className = 'ph-bold ph-lock-key text-lg text-amber-400';
+                btn.classList.add('text-amber-400');
+                lockBadge.classList.remove('opacity-0');
+            } else {
+                icon.className = 'ph-bold ph-lock-key-open text-lg';
+                btn.classList.remove('text-amber-400');
+                if (!state.aeLocked) lockBadge.classList.add('opacity-0');
+            }
+        }
+
+        function toggleExposureLock() {
+            state.aeLocked = !state.aeLocked;
+            const icon = document.getElementById('lockAeIcon');
+            const btn = document.getElementById('lockAeBtn');
+            if (state.aeLocked) {
+                icon.className = 'ph-bold ph-sun text-lg text-amber-400';
+                btn.classList.add('text-amber-400');
+                lockBadge.classList.remove('opacity-0');
+            } else {
+                icon.className = 'ph-bold ph-sun-dim text-lg';
+                btn.classList.remove('text-amber-400');
+                if (!state.afLocked) lockBadge.classList.add('opacity-0');
+            }
+        }
+
+        function setFilter(filterId, filterName) {
+            state.currentFilter = filterId;
+            state.filterName = filterName;
+            document.getElementById('filterBadge').innerText = `FILTER: ${filterName}`;
+            
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.className = 'filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-900 text-neutral-400 border border-neutral-800 whitespace-nowrap';
+            });
+            event.target.className = 'filter-btn text-xs font-mono px-3 py-1 rounded-full bg-neutral-800 text-amber-400 border border-amber-500/50 whitespace-nowrap';
+        }
+
+        document.getElementById('sensorMode').addEventListener('change', (e) => {
+            state.sensorMode = e.target.value;
+            updateTelemetry();
+        });
+
+        function updateTelemetry() {
+            const resMap = {
+                'Standard': '4000 x 3000 (12MP)',
+                '48MP': '8000 x 6000 (48MP)',
+                '64MP': '9216 x 6912 (64MP)',
+                '108MP': '12000 x 9000 (108MP)',
+                '200MP': '16384 x 12288 (200MP)'
+            };
+            document.getElementById('telemetryRes').innerText = `RES: ${resMap[state.sensorMode]}`;
+            document.getElementById('telemetryISO').innerText = `ISO: ${state.iso}`;
+            document.getElementById('telemetryShutter').innerText = `SPEED: ${state.shutterSpeeds[state.shutter - 1]}`;
+            document.getElementById('telemetryEV').innerText = `EV: ${state.ev >= 0 ? '+' : ''}${state.ev.toFixed(1)}`;
+            document.getElementById('telemetryMode').innerText = `MODE: ${state.isManualFocus ? 'MANUAL FOCUS' : 'AUTOFOCUS'}`;
+        }
+
+        // Trigger Shutter Capture Procedure
+        function triggerCapture() {
+            if (state.timerSec > 0) {
+                let count = state.timerSec;
+                const overlay = document.getElementById('countdownOverlay');
+                overlay.innerText = count;
+                overlay.classList.remove('hidden');
+
+                const timerInterval = setInterval(() => {
+                    count--;
+                    if (count > 0) {
+                        overlay.innerText = count;
+                    } else {
+                        clearInterval(timerInterval);
+                        overlay.classList.add('hidden');
+                        executePhotoCapture();
+                    }
+                }, 1000);
+            } else {
+                executePhotoCapture();
+            }
+        }
+
+        // High-Quality Multi-Pass Processing Simulation & Capture
+        function executePhotoCapture() {
+            // Flash Flash Trigger
+            if (state.flashOn) {
+                const flashEffect = document.createElement('div');
+                flashEffect.className = 'fixed inset-0 bg-white z-50 transition-opacity duration-200';
+                document.body.appendChild(flashEffect);
+                setTimeout(() => flashEffect.remove(), 150);
+            }
+
+            // Show High-Res Processing Overlay
+            const procOverlay = document.getElementById('processingOverlay');
+            const procText = document.getElementById('processingText');
+            procOverlay.classList.remove('hidden');
+            procText.innerText = `PROCESSING ${state.sensorMode} ULTRA-DETAIL FRAME...`;
+
+            setTimeout(() => {
+                procText.innerText = `APPLYING ${state.filterName} PIPELINE & DENOISE...`;
+            }, 600);
+
+            setTimeout(() => {
+                // Generate Final Crisp Image Canvas
+                const outputCanvas = document.createElement('canvas');
+                outputCanvas.width = canvas.width;
+                outputCanvas.height = canvas.height;
+                const outCtx = outputCanvas.getContext('2d');
+
+                // Render current frame with full resolution details
+                outCtx.drawImage(canvas, 0, 0);
+
+                const dataUrl = outputCanvas.toDataURL('image/jpeg', 0.98);
+
+                // Show Result Modal
+                document.getElementById('modalImage').src = dataUrl;
+                document.getElementById('modalMeta').innerText = `${state.sensorMode} | ${state.filterName} ${state.isRaw ? '| RAW' : ''} ${state.isDLog ? '| D-LOG' : ''}`;
+                
+                procOverlay.classList.add('hidden');
+                document.getElementById('photoModal').classList.remove('hidden');
+                document.getElementById('photoModal').classList.add('flex');
+            }, 1200);
+        }
+
+        function closeModal() {
+            document.getElementById('photoModal').classList.add('hidden');
+            document.getElementById('photoModal').classList.remove('flex');
+        }
+
+        function downloadImage() {
+            const imgUrl = document.getElementById('modalImage').src;
+            const a = document.createElement('a');
+            a.href = imgUrl;
+            a.download = `Lumen_Pro_${state.sensorMode}_${Date.now()}.jpg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+    </script>
+</body>
+</html>
